@@ -1,0 +1,54 @@
+function [ideal_mask] = cirm(mix_sig, voice_sig, window, offset, q, c)
+%WINDOW     = (SAMPLING_FREQUENCY/50);     % use a window of 20 ms */
+%OFFSET     = (WINDOW/2);                  % compute acf every 10 ms */
+
+[n_sample, m] = size(mix_sig);
+
+% normalize mixture
+mix_sig=mix_sig./max(mix_sig);
+voice_sig = voice_sig./max(voice_sig);
+
+n_frame = floor((n_sample-window)/offset);
+
+%rectangular window is applied here
+%frame_mix = zeros(n_frame, window);
+%frame_voice = zeros(n_frame, window);
+
+%only signle-channel is supported here
+%for n = 1:n_frame
+	%frame_mix(n,1:window) = mix_sig(1+offset*(n-1): window+offset*(n-1));
+	%frame_voice(n,1:window) = voice_sig(1+offset*(n-1): window+offset*(n-1));
+%end
+frame_mix = frame_sig(mix_sig,window,offset,@(x)ones(x,1));
+frame_voice = frame_sig(voice_sig,window,offset,@(x)ones(x,1));
+
+frame_mix = frame_mix(1:n_frame, :);
+frame_voice = frame_voice(1:n_frame, :);
+
+mix_fft = fft(frame_mix')';
+voice_fft = fft(frame_voice')';
+
+% mix_fft = frame_mix;
+% voice_fft = frame_voice;
+
+tmp_mask = voice_fft./mix_fft;
+
+rep = ceil((window+1)/2);
+
+sep_mask = zeros(n_frame, rep*2);
+sep_mask(:, 1:rep) = real(tmp_mask(:,1:rep));
+sep_mask(:, 1+rep:2*rep) = imag(tmp_mask(:,1:rep));
+
+% hyperbolic tangent transform
+for m=1:size(sep_mask,1)
+	for n=1:size(sep_mask,2)
+		sep_mask(m,n) = q*(1-exp(-c*sep_mask(m,n)))/(1+exp(-c*sep_mask(m,n)));
+	end
+end
+
+%ideal_mask = single(sep_mask');
+ideal_mask = sep_mask';
+
+%ideal_mask = tmp_mask';
+
+end
