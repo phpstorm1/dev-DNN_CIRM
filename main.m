@@ -212,31 +212,59 @@ end
 if isempty(checkpoint_path_optimizer)
 	optimizer = gen_training_optimizer(...
 								initial_learn_rate, ...
-								every_train_step, ...
+								num_epoch, ...
 								mini_batch_size, ...
 								isGPU);
 else
 	load(checkpoint_path_optimizer);
 end
 
+% generate speech, noise and snr lists used for training an epoch
+size_dataset = len_training * len_noise * numel(snr);
+list_train_data = strings(size_dataset, 6);
+fprintf('generating training data list...');
+for snr_idx=1:numel(snr)
+	for noise_idx=1: len_noise
+		for speech_idx=1: len_training
+			data_idx = speech_idx + (noise_idx-1) * len_training + (snr_idx-1) * len_noise * len_training;
+			list_train_data(data_idx, 1) = string(speech_idx);
+			list_train_data(data_idx, 2) = strcat(list_training(noise_idx).folder, filesep, list_training(noise_idx).name);
+			list_train_data(data_idx, 3) = string(noise_idx);
+			list_train_data(data_idx, 4) = strcat(list_noise(noise_idx).folder, filesep, list_noise(noise_idx).name);
+			list_train_data(data_idx, 5) = string(snr_idx);
+			list_train_data(data_idx, 6) = string(snr(snr_idx));
+		end
+	end
+end
+
+rng(random_seed);
+shuffle_idx = randperm(size_dataset);
+list_train_data = list_train_data(shuffle_idx, :);
+fprintf('...done\n');
+list_train_data = repmat(list_train_data, 2, 1);
+single_batch_size = min(file_per_batch, size_dataset);
+
 fprintf('-------------------------------------------------------\n')
+fprintf('%-20s %-20s %-20s %s\n', 'Epoch', 'Train step', 'Cost', 'validtion mse');
+total_train_steps = ceil(num_epoch * size_dataset / file_per_batch);
 for training_iter=start_step:total_train_steps
 
-	fprintf('Training. %d of %d\n', training_iter, total_train_steps);
+	cur_epoch = floor(training_iter  * single_batch_size / size_dataset);
+	% fprintf('Training. %d of %d epoch \n', cur_epoch, num_epoch);
+	% fprintf('Training. %d of %d iterations \n', training_iter, total_train_steps);
 
-	single_batch_size = min(file_per_batch, len_training);
-	% randomly select single_batch_size files from training list
-	batch_list_idx = randi([1, length(list_training)],...
-					 		[1, single_batch_size]);
-	batch_list = list_training(batch_list_idx);
+	cur_idx = mod((training_iter-1) * single_batch_size, size_dataset) + 1; 
+	batch_list_idx = cur_idx:cur_idx + single_batch_size-1;
+	batch_list = list_train_data(batch_list_idx, :);
 
-	fprintf('obtaining training data...')
+	% fprintf('obtaining training data...')
 	if isempty(load_training_data)
 		% read training files
+        batch_feat = [];
+		batch_label = [];
 		batch_wav = cell(single_batch_size, 1);
 		for training_idx=1:single_batch_size
-			[batch_wav{training_idx}, fs0] = audioread([speech_path, filesep,...
-												char(batch_list(training_idx).name)]);
+			[batch_wav{training_idx}, fs0] = audioread(char(batch_list(training_idx, 2)));
 			% resample to 16k Hz
 			batch_wav{training_idx} = resample(batch_wav{training_idx}, 16e3, fs0);
 
@@ -251,21 +279,17 @@ for training_iter=start_step:total_train_steps
 %                     batch_wav{training_idx} = [batch_wav{training_idx};
 %                                     1e-4*rand(max_len-length(validation_wav{validation_idx}), 1)];
 				end
-			end
+            end
 
-		end
-		batch_feat = [];
-		batch_label = [];
-
-		noise_idx = randi([1, len_noise], 1, 1);
-		snr_idx = randi([1, numel(snr)], 1, 1);
-		cur_snr = snr(snr_idx);
-		cur_noise = noise_wav{noise_idx};
-		for training_idx=1:single_batch_size
-			training_noisy = gen_mix(...
-							batch_wav{training_idx},...
-							cur_noise,...
-							cur_snr);
+            noise_idx = str2num(batch_list(training_idx, 3));
+            snr_idx = str2num(batch_list(training_idx, 5));
+            cur_snr = snr(snr_idx);
+            cur_noise = noise_wav{noise_idx};
+            
+            training_noisy = gen_mix(...
+                batch_wav{training_idx},...
+                cur_noise,...
+                cur_snr);
 			[tmp_feat, tmp_label] = get_training_data(...
 								batch_wav{training_idx}, ...
 								training_noisy, ...
@@ -277,25 +301,25 @@ for training_iter=start_step:total_train_steps
 								c);
 			batch_feat = [batch_feat; tmp_feat'];
 			batch_label = [batch_label; tmp_label'];
+
 		end
+
 		batch_feat = single(batch_feat);
         batch_label(find(isnan(batch_label))) = 0;
 		if save_training_data
-			save([save_path, filesep, 'training_data.mat'], 'batch_feat', 'batch_label');
+			save([save_path, filesep, 'training_data.mat'], 'batch_feat', 'batch_label', 'list_train_data');
 		end
 	else
 		load(load_training_data);
-	end
-	fprintf('...done\n')
-
+    end
+   
+    % fprintf('...done\n')
 	if useInputNormalization
 		[batch_feat_norm, net.norm_mu, net.norm_std] = mean_var_norm(batch_feat);
 		batch_feat_win = win_buffer(batch_feat_norm, adjacent_frame);
 	else
 		batch_feat_win = win_buffer(batch_feat, adjacent_frame);
 	end
-
-	fprintf('%-20s %-20s %s\n', 'Epoch', 'Cost', 'validtion mse');
 
 	if useInputNormalization
 		validation_feat_norm = mean_var_norm_testing(...
@@ -311,7 +335,9 @@ for training_iter=start_step:total_train_steps
 									validation_feat_win, ...
 									validation_label, ...
 									net, ...
-									optimizer);
+									optimizer, ...
+                                    cur_epoch, ...
+                                    training_iter);
 
 	if ~mod(training_iter, checkpoint_save_steps)
 		save_checkpoint_path = [save_path, filesep, 'checkpoint'];
@@ -323,8 +349,8 @@ for training_iter=start_step:total_train_steps
 		save([save_checkpoint_path, filesep, 'checkpoint_step', ...
 						num2str(training_iter), '_optimizer.mat'], 'optimizer');
 	end
-	fprintf('-------------------------------------------------------\n')
 end
+fprintf('-------------------------------------------------------\n')
 
 % generate test samples for evaluation
 save_idx = 1;

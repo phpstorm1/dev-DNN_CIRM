@@ -1,5 +1,5 @@
-noise_type = ["babble", "factory", "street", "restaurant"];
-snr = -5:1:10;
+noise_type = ["babble"];
+snr = 0:1;
 
 win_len = 512;
 win_shift = 256;
@@ -10,35 +10,34 @@ c = 0.5;
 % max length in seconds
 wav_max_len = [];
 
-validation_percentage = 0.1;
-file_per_batch = 50;
-total_train_steps = 3000;
-validation_step = 100;
+
+num_epoch = 10;
+random_seed = 32;
+file_per_batch = 20;
 initial_learn_rate = 1e-3;
 %learn_rate_decay_fac = 0.95;
 useInputNormalization = 1;
+mini_batch_size = 1024;
 
-mini_batch_size = 2048;
-every_train_step = 20;
-checkpoint_save_steps = 100;
+checkpoint_save_steps = 1;
+checkpoint_path_net = '';
+checkpoint_path_optimizer = '';
 
-checkpoint_path_net = './data/demo/checkpoint/checkpoint_step2000_net.mat';
-checkpoint_path_optimizer = './data/demo/checkpoint/checkpoint_step2000_optimizer.mat';
-
-save_training_data = 0;
+save_training_data = 1;
 load_training_data = '';
 
-save_validation_data = 0;
-load_validation_data = 1;
+validation_percentage = 15;
+save_validation_data = 1;
+load_validation_data = 0;
 
 gpuDevice;
 isGPU = gpuDeviceCount;
 
-hidden_layer_struct = [1024, 1024, 1024];
+hidden_layer_struct = [512, 512, 512];
 
-speech_path = '/datasets/TIMIT/train_1';
-test_path = '/datasets/TIMIT/test_1';
-noise_path = '/datasets/noise';
+speech_path = './data/train';
+test_path = './data/test';
+noise_path = './data/noise';
 save_path = './data/demo';
 
 read_from_list = 0;
